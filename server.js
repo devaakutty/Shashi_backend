@@ -1,3 +1,4 @@
+// server.js
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -10,11 +11,9 @@ dotenv.config();
 connectDB();
 
 const app = express();
+app.disable('etag'); // optional, disables caching
 
-app.disable('etag');
-
-// ✅ FIX: Only create directories if NOT running on Vercel
-// Vercel will crash if it tries to write to the file system
+// ✅ Create uploads folder locally (Vercel doesn't allow fs writes)
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     const uploadPath = path.join(__dirname, 'uploads', 'products');
     if (!fs.existsSync(uploadPath)) {
@@ -23,24 +22,35 @@ if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     }
 }
 
+// Middleware
 app.use(express.json());
 app.use(morgan('dev'));
 
-// ✅ FIX: Update CORS to allow your Vercel frontend URL
+// ✅ CORS Setup
 app.use(cors({
-    origin: [
-        'http://localhost:3000', 
-        'http://192.168.1.9:3000',
-        /\.vercel\.app$/ // This allows all your Vercel preview deployments
-    ], 
-    credentials: true
+  origin: (origin, callback) => {
+    // allow requests with no origin (Postman, curl)
+    if (!origin) return callback(null, true);
+
+    // allow localhost
+    if (origin.includes('localhost:3000')) return callback(null, true);
+
+    // allow any Vercel frontend preview or production
+    if (origin.includes('.vercel.app')) return callback(null, true);
+
+    // block others
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true
 }));
 
+// ✅ Serve uploads with cross-origin resource policy
 app.use('/uploads', (req, res, next) => {
     res.set('Cross-Origin-Resource-Policy', 'cross-origin');
     next();
 }, express.static(path.resolve(__dirname, 'uploads')));
 
+// ✅ API Routes
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
 app.use('/api/customers', require('./routes/customerRoutes'));
@@ -49,13 +59,15 @@ app.use('/api/payments', require('./routes/paymentRoutes'));
 app.use('/api/expenses', require('./routes/expenseRoutes'));
 app.use('/api/reports', require('./routes/reportRoutes'));
 
+// Root route
 app.get('/', (req, res) => {
-    res.status(200).json({ 
+    res.status(200).json({
         message: '🚀 ShaShi Chocolate & Dessert API is running',
         status: 'Cloud Atlas Connected'
     });
 });
 
+// Error middlewares
 const { errorHandler, notFound } = require('./middlewares/errorMiddleware');
 app.use(notFound);
 app.use(errorHandler);
